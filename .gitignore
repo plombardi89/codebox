@@ -1,0 +1,9 @@
+bin
+tmp
+
+.idea
+.claude
+.opencode
+!.opencode/skills
+
+docs/PLAN.md
