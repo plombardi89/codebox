@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
-	"github.com/voidfunktion/ocbox/internal/provider"
-	"github.com/voidfunktion/ocbox/internal/state"
+	"github.com/plombardi89/codebox/internal/logging"
+	"github.com/plombardi89/codebox/internal/provider"
+	"github.com/plombardi89/codebox/internal/state"
 )
 
 func init() {
@@ -63,6 +64,8 @@ func optOrDefault(opts map[string]string, key, def string) string {
 }
 
 func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey string, opts map[string]string) (*state.BoxState, error) {
+	log := logging.Get()
+
 	client, err := getClient()
 	if err != nil {
 		return nil, err
@@ -74,6 +77,7 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 
 	// If a server already exists, handle idempotently.
 	if _, ok := st.ProviderData["server_id"]; ok {
+		log.Debug("server ID found in state", "server_id", st.ProviderData["server_id"])
 		server, err := getServer(ctx, client, st)
 		if err != nil {
 			return nil, err
@@ -82,14 +86,17 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 		switch server.Status {
 		case hcloud.ServerStatusRunning:
 			// Already running, update state and return.
+			log.Debug("server already running", "name", st.Name)
 			st.Status = "up"
 			st.IP = server.PublicNet.IPv4.IP.String()
-			st.SSHPort = 22
+			st.SSHPort = 2222
 			st.UpdatedAt = time.Now()
+			log.Debug("server IP", "ip", st.IP)
 			return st, nil
 
 		case hcloud.ServerStatusOff:
 			// Power on and wait.
+			log.Info("powering on server", "name", st.Name)
 			action, _, err := client.Server.Poweron(ctx, server)
 			if err != nil {
 				return nil, fmt.Errorf("powering on server: %w", err)
@@ -99,8 +106,9 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 			}
 			st.Status = "up"
 			st.IP = server.PublicNet.IPv4.IP.String()
-			st.SSHPort = 22
+			st.SSHPort = 2222
 			st.UpdatedAt = time.Now()
+			log.Debug("server IP", "ip", st.IP)
 			return st, nil
 
 		default:
@@ -120,6 +128,7 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 		return nil, fmt.Errorf("looking up SSH key: %w", err)
 	}
 	if sshKey == nil {
+		log.Info("creating SSH key", "name", sshKeyName)
 		sshKey, _, err = client.SSHKey.Create(ctx, hcloud.SSHKeyCreateOpts{
 			Name:      sshKeyName,
 			PublicKey: pubKey,
@@ -127,10 +136,13 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 		if err != nil {
 			return nil, fmt.Errorf("creating SSH key: %w", err)
 		}
+	} else {
+		log.Debug("SSH key already exists", "name", sshKeyName)
 	}
 	st.ProviderData["ssh_key_id"] = fmt.Sprintf("%d", sshKey.ID)
 
 	// Create server.
+	log.Info("creating server", "name", st.Name, "type", serverType, "location", location, "image", image)
 	result, _, err := client.Server.Create(ctx, hcloud.ServerCreateOpts{
 		Name: st.Name,
 		ServerType: &hcloud.ServerType{
@@ -164,14 +176,18 @@ func (h *hetznerProvider) Up(ctx context.Context, st *state.BoxState, pubKey str
 
 	st.ProviderData["server_id"] = fmt.Sprintf("%d", result.Server.ID)
 	st.IP = result.Server.PublicNet.IPv4.IP.String()
-	st.SSHPort = 22
+	st.SSHPort = 2222
+	st.Image = image
 	st.Status = "up"
 	st.UpdatedAt = time.Now()
+	log.Debug("server created", "server_id", result.Server.ID, "ip", st.IP)
 
 	return st, nil
 }
 
 func (h *hetznerProvider) Down(ctx context.Context, st *state.BoxState) (*state.BoxState, error) {
+	log := logging.Get()
+
 	client, err := getClient()
 	if err != nil {
 		return nil, err
@@ -182,6 +198,7 @@ func (h *hetznerProvider) Down(ctx context.Context, st *state.BoxState) (*state.
 		return nil, err
 	}
 
+	log.Info("powering off server", "name", st.Name)
 	action, _, err := client.Server.Poweroff(ctx, server)
 	if err != nil {
 		return nil, fmt.Errorf("powering off server: %w", err)
@@ -196,6 +213,8 @@ func (h *hetznerProvider) Down(ctx context.Context, st *state.BoxState) (*state.
 }
 
 func (h *hetznerProvider) Delete(ctx context.Context, st *state.BoxState) error {
+	log := logging.Get()
+
 	client, err := getClient()
 	if err != nil {
 		return err
@@ -206,6 +225,7 @@ func (h *hetznerProvider) Delete(ctx context.Context, st *state.BoxState) error 
 		return err
 	}
 
+	log.Info("deleting server", "name", st.Name)
 	result, _, err := client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
 		return fmt.Errorf("deleting server: %w", err)
@@ -213,6 +233,7 @@ func (h *hetznerProvider) Delete(ctx context.Context, st *state.BoxState) error 
 
 	// Wait for the delete action to complete.
 	if result.Action != nil {
+		log.Info("waiting for server deletion", "name", st.Name)
 		if err := client.Action.WaitFor(ctx, result.Action); err != nil {
 			return fmt.Errorf("waiting for server deletion: %w", err)
 		}

@@ -34,3 +34,12 @@ A codebox is VM running in a cloud such as Azure or Hetzner.
   - Install OpenCode
   - Install TailScale.
   - Install Go
+
+# v3 Features
+
+- Server hardening. Need to install:
+  - fail2ban and firewall
+  - Run SSH on port 2222 instead of 22. Configure firewalld to let the new port in only.
+- Implement logging (slog) so that when user's run codebox they can see what it is doing. Logging should be turned on
+  with CODEBOX_LOGGING=<level> and should be hidden from stdout by default.
+- Support for Azure virtual machines.

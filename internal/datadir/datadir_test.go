@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/voidfunktion/ocbox/internal/datadir"
+	"github.com/plombardi89/codebox/internal/datadir"
 )
 
 func TestBoxDir(t *testing.T) {

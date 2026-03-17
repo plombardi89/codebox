@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voidfunktion/ocbox/internal/provider"
-	"github.com/voidfunktion/ocbox/internal/state"
+	"github.com/plombardi89/codebox/internal/provider"
+	"github.com/plombardi89/codebox/internal/state"
 
 	// Import hetzner to trigger init() registration.
-	_ "github.com/voidfunktion/ocbox/internal/provider/hetzner"
+	_ "github.com/plombardi89/codebox/internal/provider/hetzner"
 )
 
 func TestHetznerRegistered(t *testing.T) {

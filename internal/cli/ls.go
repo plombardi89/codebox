@@ -5,8 +5,8 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/plombardi89/codebox/internal/state"
 	"github.com/spf13/cobra"
-	"github.com/voidfunktion/ocbox/internal/state"
 )
 
 func init() {
@@ -27,12 +27,12 @@ func runLs(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "NAME\tSTATUS\tPROVIDER\tIP\tSSH PORT"); err != nil {
+	if _, err := fmt.Fprintln(w, "NAME\tSTATUS\tPROVIDER\tIMAGE\tIP\tSSH PORT"); err != nil {
 		return fmt.Errorf("writing header: %w", err)
 	}
 
 	for _, b := range boxes {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", b.Name, b.Status, b.Provider, b.IP, b.SSHPort); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", b.Name, b.Status, b.Provider, b.Image, b.IP, b.SSHPort); err != nil {
 			return fmt.Errorf("writing row: %w", err)
 		}
 	}

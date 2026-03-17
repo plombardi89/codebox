@@ -3,10 +3,11 @@ package cli
 import (
 	"fmt"
 
+	"github.com/plombardi89/codebox/internal/datadir"
+	"github.com/plombardi89/codebox/internal/logging"
+	"github.com/plombardi89/codebox/internal/provider"
+	"github.com/plombardi89/codebox/internal/state"
 	"github.com/spf13/cobra"
-	"github.com/voidfunktion/ocbox/internal/datadir"
-	"github.com/voidfunktion/ocbox/internal/provider"
-	"github.com/voidfunktion/ocbox/internal/state"
 )
 
 func init() {
@@ -24,6 +25,8 @@ func init() {
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
+	log := logging.Get()
+
 	name := args[0]
 	boxDir := datadir.BoxDir(DataDir, name)
 	stateFile := state.StatePath(boxDir)
@@ -38,6 +41,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting provider: %w", err)
 	}
 
+	log.Info("stopping box", "name", name)
 	st, err = p.Down(cmd.Context(), st)
 	if err != nil {
 		return fmt.Errorf("stopping box: %w", err)
@@ -51,12 +55,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 	deleteLocal, _ := cmd.Flags().GetBool("delete-local-storage")
 
 	if deleteRemote {
+		log.Info("deleting remote resources", "name", name)
 		if err := p.Delete(cmd.Context(), st); err != nil {
 			return fmt.Errorf("deleting remote resources: %w", err)
 		}
 	}
 
 	if deleteLocal {
+		log.Info("removing local storage", "name", name)
 		if err := datadir.RemoveBoxDir(DataDir, name); err != nil {
 			return fmt.Errorf("removing local storage: %w", err)
 		}

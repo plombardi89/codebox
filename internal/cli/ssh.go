@@ -7,10 +7,11 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/plombardi89/codebox/internal/datadir"
+	"github.com/plombardi89/codebox/internal/logging"
+	"github.com/plombardi89/codebox/internal/sshkey"
+	"github.com/plombardi89/codebox/internal/state"
 	"github.com/spf13/cobra"
-	"github.com/voidfunktion/ocbox/internal/datadir"
-	"github.com/voidfunktion/ocbox/internal/sshkey"
-	"github.com/voidfunktion/ocbox/internal/state"
 )
 
 func init() {
@@ -27,6 +28,8 @@ func init() {
 }
 
 func runSSH(cmd *cobra.Command, args []string) error {
+	log := logging.Get()
+
 	name := args[0]
 	boxDir := datadir.BoxDir(DataDir, name)
 	stateFile := state.StatePath(boxDir)
@@ -50,6 +53,8 @@ func runSSH(cmd *cobra.Command, args []string) error {
 		"-o", "UserKnownHostsFile=/dev/null",
 		fmt.Sprintf("dev@%s", st.IP),
 	}
+
+	log.Debug("SSH arguments", "args", strings.Join(sshArgs, " "))
 
 	manual, _ := cmd.Flags().GetBool("manual")
 	if manual {

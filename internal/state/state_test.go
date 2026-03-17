@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/voidfunktion/ocbox/internal/state"
+	"github.com/plombardi89/codebox/internal/state"
 )
 
 func newTestState() *state.BoxState {
@@ -16,6 +16,7 @@ func newTestState() *state.BoxState {
 		Status:   "up",
 		IP:       "1.2.3.4",
 		SSHPort:  22,
+		Image:    "fedora-43",
 		ProviderData: map[string]string{
 			"server_id": "12345",
 			"region":    "eu-central",
@@ -54,6 +55,9 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.SSHPort != original.SSHPort {
 		t.Errorf("SSHPort = %d, want %d", loaded.SSHPort, original.SSHPort)
+	}
+	if loaded.Image != original.Image {
+		t.Errorf("Image = %q, want %q", loaded.Image, original.Image)
 	}
 	if !loaded.CreatedAt.Equal(original.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v", loaded.CreatedAt, original.CreatedAt)

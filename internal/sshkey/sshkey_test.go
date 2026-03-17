@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voidfunktion/ocbox/internal/sshkey"
+	"github.com/plombardi89/codebox/internal/sshkey"
 	"golang.org/x/crypto/ssh"
 )
 

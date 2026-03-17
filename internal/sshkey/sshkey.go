@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/plombardi89/codebox/internal/logging"
 )
 
 const (
@@ -22,6 +24,8 @@ const (
 // (mode 0600) and public key (mode 0644) into sshDir. If both key
 // files already exist, it returns nil without overwriting them.
 func Generate(sshDir string) error {
+	log := logging.Get()
+
 	privPath := PrivateKeyPath(sshDir)
 	pubPath := PublicKeyPath(sshDir)
 
@@ -35,8 +39,11 @@ func Generate(sshDir string) error {
 		return fmt.Errorf("sshkey: stat %s: %w", pubPath, err)
 	}
 	if privExists && pubExists {
+		log.Debug("keys already exist, skipping generation", "dir", sshDir)
 		return nil
 	}
+
+	log.Info("generating ed25519 key pair", "dir", sshDir)
 
 	// Generate the key pair.
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
