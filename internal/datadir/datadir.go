@@ -5,11 +5,6 @@ import (
 	"path/filepath"
 )
 
-// Root returns the resolved root data directory.
-func Root(dataDir string) string {
-	return dataDir
-}
-
 // BoxDir returns the path to a named box directory.
 func BoxDir(dataDir, name string) string {
 	return filepath.Join(dataDir, name)

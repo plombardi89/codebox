@@ -8,7 +8,7 @@ Repo is organized into several directories:
 
 - `bin/` - where generated binary artifacts should be placed.
 - `cmd/` - where the sources for each binary artifact are located. Each subdirectory corresponds to a binary artifact.
-    - `codebox` - The codebox binary
+    - `codebox` - The `codebox` binary
 - `docs/` - documentation for the project.
 - `hack/` - where development tools and scripts are located.
     - `cmd/` - development tools that are built as Go binaries.
@@ -36,6 +36,8 @@ Repo is organized into several directories:
     - Large cross-package refactors.
     - New dependencies with broad impact.
     - Destructive data or migration changes.
+    - Removal or deletion of _test.go files or Test* functions.
+    - Removal or deletion of subtest functions (e.g. `t.Run()` or test table entries).
 - **Never**
     - Commit secrets, credentials, or tokens.
     - Edit generated files by hand when a generation workflow exists.

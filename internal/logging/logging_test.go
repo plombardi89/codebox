@@ -1,75 +1,62 @@
 package logging
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"testing"
 )
 
-func TestGet_Default(t *testing.T) {
-	t.Setenv("CODEBOX_LOGGING", "")
-	Init()
+func TestNew_DefaultLevel(t *testing.T) {
+	var levelVar slog.LevelVar
+	levelVar.Set(slog.LevelInfo)
 
-	log := Get()
+	log := New(&levelVar)
 	if log == nil {
-		t.Fatal("Get() returned nil logger")
+		t.Fatal("New() returned nil logger")
 	}
 
-	// Must not panic.
-	log.Info("should be discarded")
-
-	// The handler should report Enabled == false for all levels.
 	if log.Handler().Enabled(context.TODO(), slog.LevelDebug) {
-		t.Error("nop handler should not be enabled for debug")
+		t.Error("INFO level should not enable debug")
 	}
-	if log.Handler().Enabled(context.TODO(), slog.LevelInfo) {
-		t.Error("nop handler should not be enabled for info")
+
+	if !log.Handler().Enabled(context.TODO(), slog.LevelInfo) {
+		t.Error("INFO level should enable info")
 	}
 }
 
-func TestGet_WithLevel(t *testing.T) {
-	t.Setenv("CODEBOX_LOGGING", "debug")
-	Init()
+func TestNew_DebugLevel(t *testing.T) {
+	var levelVar slog.LevelVar
+	levelVar.Set(slog.LevelDebug)
 
-	log := Get()
+	log := New(&levelVar)
 	if log == nil {
-		t.Fatal("Get() returned nil logger")
+		t.Fatal("New() returned nil logger")
 	}
 
-	// The handler should be enabled for debug level.
 	if !log.Handler().Enabled(context.TODO(), slog.LevelDebug) {
-		t.Error("handler should be enabled for debug")
-	}
-	if !log.Handler().Enabled(context.TODO(), slog.LevelInfo) {
-		t.Error("handler should be enabled for info")
+		t.Error("DEBUG level should enable debug")
 	}
 
-	// Verify that logging actually produces output by replacing the handler
-	// with one writing to a buffer.
-	var buf bytes.Buffer
-	testLogger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	testLogger.Info("test message", "key", "value")
-	if buf.Len() == 0 {
-		t.Error("expected log output, got nothing")
+	if !log.Handler().Enabled(context.TODO(), slog.LevelInfo) {
+		t.Error("DEBUG level should enable info")
 	}
 }
 
-func TestGet_InvalidLevel(t *testing.T) {
-	t.Setenv("CODEBOX_LOGGING", "banana")
-	Init()
+func TestNew_LevelVarChange(t *testing.T) {
+	var levelVar slog.LevelVar
+	levelVar.Set(slog.LevelInfo)
 
-	log := Get()
-	if log == nil {
-		t.Fatal("Get() returned nil logger")
-	}
+	log := New(&levelVar)
 
-	// Invalid level should default to info, so debug should be disabled
-	// but info should be enabled.
+	// Debug should be disabled at INFO.
 	if log.Handler().Enabled(context.TODO(), slog.LevelDebug) {
-		t.Error("invalid level should default to info; debug should be disabled")
+		t.Error("INFO level should not enable debug")
 	}
-	if !log.Handler().Enabled(context.TODO(), slog.LevelInfo) {
-		t.Error("invalid level should default to info; info should be enabled")
+
+	// Switch to DEBUG at runtime.
+	levelVar.Set(slog.LevelDebug)
+
+	if !log.Handler().Enabled(context.TODO(), slog.LevelDebug) {
+		t.Error("after switching to DEBUG, debug should be enabled")
 	}
 }

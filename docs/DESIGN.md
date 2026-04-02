@@ -43,3 +43,13 @@ A codebox is VM running in a cloud such as Azure or Hetzner.
 - Implement logging (slog) so that when user's run codebox they can see what it is doing. Logging should be turned on
   with CODEBOX_LOGGING=<level> and should be hidden from stdout by default.
 - Support for Azure virtual machines.
+
+# v4 Features
+
+- A codebox user might work from multiple computers. Need a way to sync the state of available CodeBox instances to
+  their current machine.
+  - Not supported for Hetzner
+  - For Azure
+    - Put SSH private key in key vault that exists for each codebox.
+    - Store basic configuration on the Resource Group tags for the Codebox.
+    - Find all Codeboxes for a User by listing codebox resource groups and discriminating by the user's Object ID.

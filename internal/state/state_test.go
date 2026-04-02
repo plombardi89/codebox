@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,8 +10,12 @@ import (
 	"github.com/plombardi89/codebox/internal/state"
 )
 
-func newTestState() *state.BoxState {
-	return &state.BoxState{
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
+
+func newTestState() *state.Box {
+	return &state.Box{
 		Name:     "testbox",
 		Provider: "hetzner",
 		Status:   "up",
@@ -28,11 +33,11 @@ func newTestState() *state.BoxState {
 
 func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
-	stateFile := state.StatePath(dir)
+	stateFile := state.Path(dir)
 
 	original := newTestState()
 
-	if err := state.Save(stateFile, original); err != nil {
+	if err := state.Save(stateFile, original, discardLogger()); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -44,30 +49,39 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.Name != original.Name {
 		t.Errorf("Name = %q, want %q", loaded.Name, original.Name)
 	}
+
 	if loaded.Provider != original.Provider {
 		t.Errorf("Provider = %q, want %q", loaded.Provider, original.Provider)
 	}
+
 	if loaded.Status != original.Status {
 		t.Errorf("Status = %q, want %q", loaded.Status, original.Status)
 	}
+
 	if loaded.IP != original.IP {
 		t.Errorf("IP = %q, want %q", loaded.IP, original.IP)
 	}
+
 	if loaded.SSHPort != original.SSHPort {
 		t.Errorf("SSHPort = %d, want %d", loaded.SSHPort, original.SSHPort)
 	}
+
 	if loaded.Image != original.Image {
 		t.Errorf("Image = %q, want %q", loaded.Image, original.Image)
 	}
+
 	if !loaded.CreatedAt.Equal(original.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v", loaded.CreatedAt, original.CreatedAt)
 	}
+
 	if !loaded.UpdatedAt.Equal(original.UpdatedAt) {
 		t.Errorf("UpdatedAt = %v, want %v", loaded.UpdatedAt, original.UpdatedAt)
 	}
+
 	if len(loaded.ProviderData) != len(original.ProviderData) {
 		t.Fatalf("ProviderData length = %d, want %d", len(loaded.ProviderData), len(original.ProviderData))
 	}
+
 	for k, v := range original.ProviderData {
 		if loaded.ProviderData[k] != v {
 			t.Errorf("ProviderData[%q] = %q, want %q", k, loaded.ProviderData[k], v)
@@ -77,11 +91,11 @@ func TestSaveAndLoad(t *testing.T) {
 
 func TestSaveAtomic(t *testing.T) {
 	dir := t.TempDir()
-	stateFile := state.StatePath(dir)
+	stateFile := state.Path(dir)
 
 	original := newTestState()
 
-	if err := state.Save(stateFile, original); err != nil {
+	if err := state.Save(stateFile, original, discardLogger()); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -95,6 +109,7 @@ func TestSaveAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after Save failed: %v", err)
 	}
+
 	if loaded.Name != original.Name {
 		t.Errorf("round-trip Name = %q, want %q", loaded.Name, original.Name)
 	}
@@ -112,7 +127,7 @@ func TestLoadMissing(t *testing.T) {
 
 func TestLoadCorrupt(t *testing.T) {
 	dir := t.TempDir()
-	stateFile := state.StatePath(dir)
+	stateFile := state.Path(dir)
 
 	if err := os.WriteFile(stateFile, []byte("{not valid json!!!"), 0o644); err != nil {
 		t.Fatalf("failed to write corrupt file: %v", err)
@@ -134,21 +149,22 @@ func TestListAll(t *testing.T) {
 			t.Fatalf("failed to create dir %s: %v", name, err)
 		}
 
-		stateFile := state.StatePath(boxDir)
+		stateFile := state.Path(boxDir)
 		if name == "box3" {
 			// Write invalid JSON for box3.
 			if err := os.WriteFile(stateFile, []byte("corrupt"), 0o644); err != nil {
 				t.Fatalf("failed to write corrupt state for %s: %v", name, err)
 			}
+
 			continue
 		}
 
-		s := &state.BoxState{
+		s := &state.Box{
 			Name:     name,
 			Provider: "azure",
 			Status:   "up",
 		}
-		if err := state.Save(stateFile, s); err != nil {
+		if err := state.Save(stateFile, s, discardLogger()); err != nil {
 			t.Fatalf("Save failed for %s: %v", name, err)
 		}
 	}
@@ -157,6 +173,7 @@ func TestListAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAll failed: %v", err)
 	}
+
 	if len(states) != 2 {
 		t.Fatalf("ListAll returned %d states, want 2", len(states))
 	}
@@ -169,6 +186,7 @@ func TestListAll_EmptyDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAll on empty dir failed: %v", err)
 	}
+
 	if len(states) != 0 {
 		t.Fatalf("ListAll on empty dir returned %d states, want 0", len(states))
 	}
@@ -181,6 +199,7 @@ func TestListAll_NonExistent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAll on non-existent dir failed: %v", err)
 	}
+
 	if len(states) != 0 {
 		t.Fatalf("ListAll on non-existent dir returned %d states, want 0", len(states))
 	}

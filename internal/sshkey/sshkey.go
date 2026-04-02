@@ -6,13 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
-
-	"github.com/plombardi89/codebox/internal/logging"
 )
 
 const (
@@ -23,9 +22,7 @@ const (
 // Generate creates an ed25519 key pair and writes the private key
 // (mode 0600) and public key (mode 0644) into sshDir. If both key
 // files already exist, it returns nil without overwriting them.
-func Generate(sshDir string) error {
-	log := logging.Get()
-
+func Generate(sshDir string, log *slog.Logger) error {
 	privPath := PrivateKeyPath(sshDir)
 	pubPath := PublicKeyPath(sshDir)
 
@@ -34,10 +31,12 @@ func Generate(sshDir string) error {
 	if err != nil {
 		return fmt.Errorf("sshkey: stat %s: %w", privPath, err)
 	}
+
 	pubExists, err := fileExists(pubPath)
 	if err != nil {
 		return fmt.Errorf("sshkey: stat %s: %w", pubPath, err)
 	}
+
 	if privExists && pubExists {
 		log.Debug("keys already exist, skipping generation", "dir", sshDir)
 		return nil
@@ -56,6 +55,7 @@ func Generate(sshDir string) error {
 	if err != nil {
 		return fmt.Errorf("sshkey: marshal private key: %w", err)
 	}
+
 	privBytes := pem.EncodeToMemory(privPEM)
 
 	// Marshal the public key to OpenSSH authorized_keys format.
@@ -63,21 +63,10 @@ func Generate(sshDir string) error {
 	if err != nil {
 		return fmt.Errorf("sshkey: marshal public key: %w", err)
 	}
+
 	pubBytes := ssh.MarshalAuthorizedKey(sshPub)
 
-	// Ensure the target directory exists.
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return fmt.Errorf("sshkey: create directory %s: %w", sshDir, err)
-	}
-
-	if err := os.WriteFile(privPath, privBytes, 0o600); err != nil {
-		return fmt.Errorf("sshkey: write private key: %w", err)
-	}
-	if err := os.WriteFile(pubPath, pubBytes, 0o644); err != nil {
-		return fmt.Errorf("sshkey: write public key: %w", err)
-	}
-
-	return nil
+	return WriteKeyPair(sshDir, privBytes, pubBytes)
 }
 
 // PrivateKeyPath returns the path to the private key inside sshDir.
@@ -97,7 +86,38 @@ func ReadPublicKey(sshDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("sshkey: read public key: %w", err)
 	}
+
 	return strings.TrimRight(string(data), " \t\r\n"), nil
+}
+
+// DerivePublicKey parses an OpenSSH PEM private key and returns the
+// corresponding public key in authorized_keys format.
+func DerivePublicKey(privateKeyPEM []byte) ([]byte, error) {
+	signer, err := ssh.ParsePrivateKey(privateKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("sshkey: parse private key: %w", err)
+	}
+
+	return ssh.MarshalAuthorizedKey(signer.PublicKey()), nil
+}
+
+// WriteKeyPair writes an SSH key pair into sshDir, creating the directory
+// (mode 0700) if needed. The private key is written with mode 0600 and the
+// public key with mode 0644.
+func WriteKeyPair(sshDir string, privateKeyPEM, publicKey []byte) error {
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		return fmt.Errorf("sshkey: create directory %s: %w", sshDir, err)
+	}
+
+	if err := os.WriteFile(PrivateKeyPath(sshDir), privateKeyPEM, 0o600); err != nil {
+		return fmt.Errorf("sshkey: write private key: %w", err)
+	}
+
+	if err := os.WriteFile(PublicKeyPath(sshDir), publicKey, 0o644); err != nil {
+		return fmt.Errorf("sshkey: write public key: %w", err)
+	}
+
+	return nil
 }
 
 // fileExists returns true if the path exists, false if it does not,
@@ -107,8 +127,10 @@ func fileExists(path string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
+
 	if os.IsNotExist(err) {
 		return false, nil
 	}
+
 	return false, err
 }

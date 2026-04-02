@@ -5,23 +5,24 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/plombardi89/codebox/internal/state"
 	"github.com/spf13/cobra"
+
+	"github.com/plombardi89/codebox/internal/state"
 )
 
-func init() {
-	lsCmd := &cobra.Command{
+func newLsCmd(dataDir *string) *cobra.Command {
+	return &cobra.Command{
 		Use:   "ls",
 		Short: "List all codeboxes",
 		Args:  cobra.NoArgs,
-		RunE:  runLs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLs(*dataDir)
+		},
 	}
-
-	rootCmd.AddCommand(lsCmd)
 }
 
-func runLs(cmd *cobra.Command, args []string) error {
-	boxes, err := state.ListAll(DataDir)
+func runLs(dataDir string) error {
+	boxes, err := state.ListAll(dataDir)
 	if err != nil {
 		return fmt.Errorf("listing boxes: %w", err)
 	}
