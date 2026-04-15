@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/plombardi89/codebox/internal/datadir"
+	"github.com/plombardi89/codebox/internal/mutagen"
 	"github.com/plombardi89/codebox/internal/provider"
 	azureprovider "github.com/plombardi89/codebox/internal/provider/azure"
 	"github.com/plombardi89/codebox/internal/state"
@@ -58,6 +59,13 @@ func runDown(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir 
 	}
 
 	log.Info("stopping box", "name", name)
+
+	// Best-effort: terminate any mutagen file sync sessions for this box.
+	if err := mutagen.EnsureInstalled(); err == nil {
+		if err := mutagen.StopSessions(cmd.Context(), name, log); err != nil {
+			log.Debug("could not terminate file sync sessions", "error", err)
+		}
+	}
 
 	st, err = p.Down(cmd.Context(), st)
 	if err != nil {

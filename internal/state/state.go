@@ -30,6 +30,7 @@ type Box struct {
 	IP           string
 	SSHPort      int
 	Image        string // OS image (e.g. "fedora-43", "Fedora-Cloud-43-x64")
+	Profile      string // box profile name used at creation (empty = none)
 	ProviderData map[string]string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time

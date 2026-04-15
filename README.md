@@ -1,6 +1,13 @@
 # codebox
 
-CLI tool for managing remote development VMs on Hetzner Cloud. Spins up a Fedora VM with Go, OpenCode, and SSH key auth pre-configured via cloud-init.
+CLI tool for managing remote development VMs on Hetzner Cloud or Azure. Spins up a Fedora VM with Go, OpenCode, zsh, and SSH key auth pre-configured via cloud-init.
+
+## Prerequisites
+
+- Go 1.24+ (to build)
+- A Hetzner API token (`HCLOUD_TOKEN`) or Azure credentials (`AZURE_SUBSCRIPTION_ID` + `az login`)
+- [mutagen](https://mutagen.io/) installed locally (only needed for `filesync`)
+- [opencode](https://opencode.ai/) installed locally (only needed for `codebox opencode`)
 
 ## Build
 
@@ -8,67 +15,220 @@ CLI tool for managing remote development VMs on Hetzner Cloud. Spins up a Fedora
 make codebox
 ```
 
-## Usage
+## Quick start
 
-Set your Hetzner API token:
-
-```
+```sh
 export HCLOUD_TOKEN=your-token
+
+# Create a box and wait for it to be ready
+codebox up mybox
+
+# SSH in
+codebox ssh mybox
+
+# Or run OpenCode remotely and attach the local TUI
+codebox opencode mybox
+
+# Stop the VM (keeps state for later)
+codebox down mybox
 ```
 
-Create a VM:
+## Commands
 
-```
-bin/codebox up mybox
-```
+### `codebox up <name>`
 
-SSH in:
+Create or start a codebox. If the box already exists, it resumes the existing VM.
 
-```
-bin/codebox ssh mybox
-```
-
-List boxes:
-
-```
-bin/codebox ls
+```sh
+codebox up mybox
+codebox up mybox --provider azure --azure-vm-size standard_d4ads_v6
+codebox up mybox --profile python
+codebox up mybox --recreate              # destroy VM and recreate with fresh cloud-init
+codebox up mybox --tailscale             # requires TAILSCALE_AUTHKEY env var
 ```
 
-Stop a VM:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` | `hetzner` | Cloud provider (`hetzner` or `azure`) |
+| `--hetzner-server-type` | `cx33` | Hetzner server type |
+| `--hetzner-location` | `hel1` | Hetzner datacenter location |
+| `--hetzner-image` | `fedora-43` | Hetzner OS image |
+| `--azure-vm-size` | `standard_d2ads_v6` | Azure VM size |
+| `--azure-location` | `canadacentral` | Azure region |
+| `--azure-subscription-id` | | Azure subscription ID (overrides `AZURE_SUBSCRIPTION_ID`) |
+| `--profile` | | Box profile name (see [Profiles](#profiles)) |
+| `--recreate` | `false` | Delete and recreate the VM with fresh cloud-init |
+| `--tailscale` | `false` | Enable TailScale (requires `TAILSCALE_AUTHKEY`) |
 
+### `codebox down <name>`
+
+Stop a codebox. By default, only stops the VM — state and remote resources are preserved.
+
+```sh
+codebox down mybox                         # stop VM
+codebox down mybox --delete                # stop and delete remote resources
+codebox down mybox --delete --delete-local-storage  # also remove local state
 ```
-bin/codebox down mybox
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--delete` | `false` | Delete remote resources after stopping |
+| `--delete-local-storage` | `false` | Remove local box directory after stopping |
+| `--azure-subscription-id` | | Azure subscription ID override |
+
+### `codebox ssh <name>`
+
+SSH into a codebox.
+
+```sh
+codebox ssh mybox
+codebox ssh mybox --wait                   # wait up to 5m for SSH to be ready
+codebox ssh mybox --wait 10m               # wait up to 10m
+codebox ssh mybox --manual                 # print the ssh command instead of running it
 ```
 
-Stop and destroy remote resources:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--wait` | | Wait for SSH to become ready. Accepts an optional duration (default `5m` if no value given). |
+| `--manual` | `false` | Print the ssh command instead of executing it |
 
+### `codebox opencode <name>`
+
+Start an OpenCode server on the remote box and attach the local TUI via an SSH tunnel.
+
+This runs `opencode serve` on the VM, sets up local port forwarding, then runs `opencode attach` locally. When you exit the TUI, the tunnel is cleaned up automatically.
+
+```sh
+codebox opencode mybox
+codebox opencode mybox --wait              # wait for SSH first (useful right after 'up')
+codebox opencode mybox --port 8080         # use a different port
 ```
-bin/codebox down mybox --delete
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `4096` | Port for the OpenCode server (used on both remote and local sides of the tunnel) |
+| `--wait` | | Wait for SSH to become ready. Accepts an optional duration (default `5m`). |
+
+### `codebox ls`
+
+List all codeboxes and their status.
+
+```sh
+codebox ls
 ```
 
-Stop, destroy remote resources, and remove local state:
+### `codebox filesync`
 
+Manage bidirectional file sync sessions between local and remote paths using [mutagen](https://mutagen.io/).
+
+```sh
+# Start syncing local directories to the remote box
+codebox filesync start mybox ./src:/home/dev/project/src ./config:/home/dev/project/config
+
+# Check sync status
+codebox filesync status mybox
+
+# Pause / resume
+codebox filesync pause mybox
+codebox filesync resume mybox
+
+# List all sync sessions for a box
+codebox filesync ls mybox
+
+# Stop all sync sessions
+codebox filesync stop mybox
 ```
-bin/codebox down mybox --delete --delete-local-storage
+
+`filesync start` accepts `--mode` to set the mutagen sync mode (default: `two-way-safe`).
+
+### `codebox sync`
+
+Discover Azure codeboxes belonging to the current user and sync SSH keys and state locally. Useful when accessing boxes from a new machine.
+
+```sh
+codebox sync
+codebox sync --azure-subscription-id your-sub-id
 ```
 
-## Flags
+### Global flags
 
-`codebox up` accepts:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--data-dir` | `~/.codebox` | Path to codebox data directory (or set `CODEBOX_DATA_DIR`) |
+| `-v, --verbose` | `false` | Enable debug logging |
 
-- `--provider` - cloud provider (default: `hetzner`)
-- `--hetzner-server-type` - server type (default: `cx33`)
-- `--hetzner-location` - datacenter (default: `hel1`)
-- `--hetzner-image` - OS image (default: `fedora-43`)
-- `--tailscale` - enable TailScale (requires `TAILSCALE_AUTHKEY` env var)
-- `--data-dir` - data directory (default: `$CODEBOX_DATA_DIR` or `~/.codebox`)
+## Profiles
+
+Profiles add extra OS packages to the cloud-init configuration. Create a YAML file at `~/.codebox/profiles/<name>.yaml`:
+
+```yaml
+# ~/.codebox/profiles/python.yaml
+packages:
+  - python3
+  - python3-pip
+  - python3-devel
+```
+
+Then use it when creating a box:
+
+```sh
+codebox up mybox --profile python
+```
+
+The profile is persisted in the box state. On `--recreate`, the same profile is reused unless you pass a different `--profile`.
 
 ## VM setup
 
-VMs are provisioned with cloud-init:
+VMs are provisioned with cloud-init on Fedora. The baseline configuration includes:
 
-- User `dev` with sudo, SSH key auth
-- Go 1.24.4
-- OpenCode
-- Root login and password auth disabled
-- Optional TailScale
+- **User:** `dev` with passwordless sudo and SSH key auth
+- **Shell:** zsh with Oh My Zsh and the Aphrodite theme
+- **Prompt:** `[codebox:<name>]` prepended to the zsh prompt
+- **Go:** 1.24.4 installed to `/usr/local/go`
+- **OpenCode:** installed to `~/.opencode/bin/opencode`
+- **SSH:** runs on port 2222, root login disabled, password auth disabled
+- **Firewall:** firewalld with only port 2222/tcp open
+- **SELinux:** port 2222 allowed for sshd
+- **fail2ban:** enabled, monitoring sshd on port 2222
+- **systemd-binfmt:** masked (avoids rate-limit failures on cloud VMs)
+- **TailScale:** optional, enabled with `--tailscale`
+
+Profile packages are installed alongside the baseline packages.
+
+## Common scenarios
+
+### Spin up a box and start coding
+
+```sh
+codebox up work
+codebox opencode work --wait
+```
+
+The `--wait` flag handles the case where cloud-init is still running. Once SSH is ready, the OpenCode TUI attaches automatically.
+
+### Recreate a box with a different profile
+
+```sh
+codebox up work --recreate --profile nodejs
+```
+
+This destroys the existing VM and creates a fresh one with the new profile. Infrastructure (SSH keys, networks) is preserved.
+
+### Sync local files to a remote box
+
+```sh
+codebox filesync start work ./my-project:/home/dev/my-project
+codebox opencode work
+```
+
+Mutagen keeps the directories in sync bidirectionally. Changes made by OpenCode on the remote box are synced back locally.
+
+### Access Azure boxes from a new machine
+
+```sh
+codebox sync --azure-subscription-id your-sub-id
+codebox ls
+codebox ssh work
+```
+
+`codebox sync` discovers existing boxes and downloads their SSH keys from Azure Key Vault.

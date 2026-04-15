@@ -13,8 +13,10 @@ import (
 
 	"github.com/plombardi89/codebox/internal/cloudinit"
 	"github.com/plombardi89/codebox/internal/datadir"
+	"github.com/plombardi89/codebox/internal/profile"
 	"github.com/plombardi89/codebox/internal/provider"
 	azureprovider "github.com/plombardi89/codebox/internal/provider/azure"
+	"github.com/plombardi89/codebox/internal/sshconfig"
 	"github.com/plombardi89/codebox/internal/sshkey"
 	"github.com/plombardi89/codebox/internal/state"
 )
@@ -38,6 +40,7 @@ func newUpCmd(reg *provider.Registry, dataDir *string, log *slog.Logger) *cobra.
 	cmd.Flags().String("azure-subscription-id", "", "Azure subscription ID (overrides AZURE_SUBSCRIPTION_ID)")
 	cmd.Flags().Bool("tailscale", false, "enable TailScale setup on the VM")
 	cmd.Flags().Bool("recreate", false, "delete and recreate the box with fresh cloud-init config")
+	cmd.Flags().String("profile", "", "box profile name to load from ~/.codebox/profiles/<name>.yaml")
 
 	return cmd
 }
@@ -66,9 +69,13 @@ func getBoolFlag(cmd *cobra.Command, name string) (bool, error) {
 // provider-specific flags into an opts map suitable for Provider.Up().
 // It is used by both the new-box and resume paths so that a provider can
 // recreate a deleted VM with the same configuration.
-func buildProviderOpts(cmd *cobra.Command, providerName, dataDir, boxName, pubKey string, log *slog.Logger) (map[string]string, error) {
+func buildProviderOpts(cmd *cobra.Command, providerName, dataDir, boxName, pubKey string, extraPackages []string, log *slog.Logger) (map[string]string, error) {
 	// Build cloud-init user-data.
-	ciCfg := cloudinit.Config{SSHPubKey: pubKey}
+	ciCfg := cloudinit.Config{
+		SSHPubKey:     pubKey,
+		ExtraPackages: extraPackages,
+		BoxName:       boxName,
+	}
 
 	tailscale, err := getBoolFlag(cmd, "tailscale")
 	if err != nil {
@@ -174,6 +181,35 @@ func destroyExistingVM(cmd *cobra.Command, reg *provider.Registry, stateFile str
 	return nil
 }
 
+// resolveProfilePackages determines which profile to use and returns its
+// packages. If the --profile flag is explicitly set it takes precedence;
+// otherwise the persisted profile name from state is used. Returns nil when
+// no profile applies.
+func resolveProfilePackages(cmd *cobra.Command, stateProfile, dataDir string, log *slog.Logger) ([]string, error) {
+	profileName, err := getFlag(cmd, "profile")
+	if err != nil {
+		return nil, err
+	}
+
+	// Prefer explicit flag; fall back to what was saved in state.
+	if profileName == "" {
+		profileName = stateProfile
+	}
+
+	if profileName == "" {
+		return nil, nil
+	}
+
+	prof, err := profile.Load(dataDir, profileName)
+	if err != nil {
+		return nil, fmt.Errorf("loading profile: %w", err)
+	}
+
+	log.Info("using box profile", "profile", profileName, "packages", prof.Packages)
+
+	return prof.Packages, nil
+}
+
 func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir string, log *slog.Logger) error {
 	name := args[0]
 	boxDir := datadir.BoxDir(dataDir, name)
@@ -215,10 +251,17 @@ func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir st
 			return fmt.Errorf("reading public key: %w", err)
 		}
 
+		// Resolve profile: prefer explicit --profile flag, fall back to
+		// the profile persisted in state (set at creation time).
+		extraPackages, err := resolveProfilePackages(cmd, st.Profile, dataDir, log)
+		if err != nil {
+			return err
+		}
+
 		// Build full opts so the provider can recreate a deleted VM.
 		// For a normal resume (VM still exists) these extra fields are
 		// ignored; for a recreate they are essential.
-		upOpts, err := buildProviderOpts(cmd, st.Provider, dataDir, name, pubKey, log)
+		upOpts, err := buildProviderOpts(cmd, st.Provider, dataDir, name, pubKey, extraPackages, log)
 		if err != nil {
 			return err
 		}
@@ -268,12 +311,31 @@ func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir st
 			UpdatedAt: now,
 		}
 
+		// Load profile packages if --profile was given.
+		profileName, err := getFlag(cmd, "profile")
+		if err != nil {
+			return err
+		}
+
+		var extraPackages []string
+
+		if profileName != "" {
+			prof, err := profile.Load(dataDir, profileName)
+			if err != nil {
+				return fmt.Errorf("loading profile: %w", err)
+			}
+
+			extraPackages = prof.Packages
+			st.Profile = profileName
+			log.Info("using box profile", "profile", profileName, "packages", extraPackages)
+		}
+
 		p, err := reg.Get(st.Provider)
 		if err != nil {
 			return fmt.Errorf("getting provider: %w", err)
 		}
 
-		opts, err := buildProviderOpts(cmd, providerName, dataDir, name, pubKey, log)
+		opts, err := buildProviderOpts(cmd, providerName, dataDir, name, pubKey, extraPackages, log)
 		if err != nil {
 			return err
 		}
@@ -293,8 +355,15 @@ func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir st
 
 		// Wait for cloud-init to finish and SSH key auth to work.
 		keyPath := sshkey.PrivateKeyPath(datadir.SSHDir(dataDir, name))
-		if err := waitForSSH(cmd.Context(), keyPath, st.IP, st.SSHPort, log); err != nil {
+		if err := waitForSSH(cmd.Context(), keyPath, st.IP, st.SSHPort, 5*time.Minute, log); err != nil {
 			return err
+		}
+	}
+
+	// Update the SSH config entry so the host alias is always current.
+	if st.IP != "" {
+		if err := sshconfig.WriteBoxEntry(dataDir, name, st.IP, st.SSHPort); err != nil {
+			log.Debug("could not update SSH config entry", "error", err)
 		}
 	}
 
@@ -305,9 +374,8 @@ func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir st
 }
 
 // waitForSSH polls the VM until an SSH connection with key auth succeeds.
-// This ensures cloud-init has finished setting up the dev user and
-// authorized_keys before codebox up returns.
-func waitForSSH(ctx context.Context, keyPath, ip string, port int, log *slog.Logger) error {
+// It retries for up to timeout, using a 5-second poll interval.
+func waitForSSH(ctx context.Context, keyPath, ip string, port int, timeout time.Duration, log *slog.Logger) error {
 	keyData, err := os.ReadFile(keyPath)
 	if err != nil {
 		return fmt.Errorf("reading private key: %w", err)
@@ -327,12 +395,9 @@ func waitForSSH(ctx context.Context, keyPath, ip string, port int, log *slog.Log
 
 	addr := net.JoinHostPort(ip, fmt.Sprintf("%d", port))
 
-	const (
-		pollInterval = 5 * time.Second
-		maxWait      = 5 * time.Minute
-	)
+	const pollInterval = 5 * time.Second
 
-	deadline := time.Now().Add(maxWait)
+	deadline := time.Now().Add(timeout)
 	attempt := 0
 
 	fmt.Printf("Waiting for SSH to become ready...")
@@ -340,7 +405,7 @@ func waitForSSH(ctx context.Context, keyPath, ip string, port int, log *slog.Log
 	for {
 		if time.Now().After(deadline) {
 			fmt.Println()
-			return fmt.Errorf("SSH not ready after %s", maxWait)
+			return fmt.Errorf("SSH not ready after %s", timeout)
 		}
 
 		if ctx.Err() != nil {

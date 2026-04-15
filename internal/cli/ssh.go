@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,6 +28,10 @@ func newSSHCmd(dataDir *string, log *slog.Logger) *cobra.Command {
 
 	cmd.Flags().Bool("manual", false, "print the ssh command instead of executing it")
 
+	wait := cmd.Flags().String("wait", "", `wait for SSH to become ready (optional timeout, default "5m")`)
+	_ = wait
+	cmd.Flags().Lookup("wait").NoOptDefVal = "5m"
+
 	return cmd
 }
 
@@ -46,6 +51,28 @@ func runSSH(cmd *cobra.Command, args []string, dataDir string, log *slog.Logger)
 
 	keyPath := sshkey.PrivateKeyPath(datadir.SSHDir(dataDir, name))
 
+	manual, err := getBoolFlag(cmd, "manual")
+	if err != nil {
+		return err
+	}
+
+	// --wait: poll until SSH is reachable before connecting.
+	waitFlag, err := getFlag(cmd, "wait")
+	if err != nil {
+		return err
+	}
+
+	if waitFlag != "" && !manual {
+		timeout, err := time.ParseDuration(waitFlag)
+		if err != nil {
+			return fmt.Errorf("invalid --wait duration: %w", err)
+		}
+
+		if err := waitForSSH(cmd.Context(), keyPath, st.IP, st.SSHPort, timeout, log); err != nil {
+			return err
+		}
+	}
+
 	sshArgs := []string{
 		"ssh",
 		"-i", keyPath,
@@ -56,11 +83,6 @@ func runSSH(cmd *cobra.Command, args []string, dataDir string, log *slog.Logger)
 	}
 
 	log.Debug("SSH arguments", "args", strings.Join(sshArgs, " "))
-
-	manual, err := getBoolFlag(cmd, "manual")
-	if err != nil {
-		return err
-	}
 
 	if manual {
 		fmt.Println(strings.Join(sshArgs, " "))

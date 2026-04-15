@@ -53,3 +53,10 @@ A codebox is VM running in a cloud such as Azure or Hetzner.
     - Put SSH private key in key vault that exists for each codebox.
     - Store basic configuration on the Resource Group tags for the Codebox.
     - Find all Codeboxes for a User by listing codebox resource groups and discriminating by the user's Object ID.
+
+# v5 Features
+
+- Introduce a concept of a Box Profile which specifies the packages to install on a Box by default. When creating a new
+  box the user can specify --profile <name> where the profile is loaded from ~/.codebox/profiles/<name>.yaml. This 
+  allows users to have different types of boxes with different packages installed by default. These packages should be
+  installed by `cloud-init` along with the necessary baseline packages.

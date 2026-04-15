@@ -199,3 +199,138 @@ func TestGenerate_HardeningConfig(t *testing.T) {
 		t.Error("fail2ban enable should come before Go install")
 	}
 }
+
+func TestGenerate_WithExtraPackages(t *testing.T) {
+	cfg := cloudinit.Config{
+		SSHPubKey:     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... test@host",
+		ExtraPackages: []string{"nodejs", "docker", "python3"},
+	}
+
+	out, err := cloudinit.Generate(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, pkg := range cfg.ExtraPackages {
+		if !strings.Contains(out, "  - "+pkg) {
+			t.Errorf("output should contain package %q", pkg)
+		}
+	}
+
+	// Baseline packages must still be present.
+	for _, pkg := range []string{"zsh", "git", "curl", "tar", "fail2ban", "firewalld"} {
+		if !strings.Contains(out, "  - "+pkg) {
+			t.Errorf("output should still contain baseline package %q", pkg)
+		}
+	}
+
+	// Validate YAML.
+	var parsed any
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Errorf("output is not valid YAML: %v", err)
+	}
+}
+
+func TestGenerate_EmptyExtraPackages(t *testing.T) {
+	cfgWithout := cloudinit.Config{
+		SSHPubKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... test@host",
+	}
+
+	cfgWith := cloudinit.Config{
+		SSHPubKey:     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... test@host",
+		ExtraPackages: []string{},
+	}
+
+	outWithout, err := cloudinit.Generate(cfgWithout, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	outWith, err := cloudinit.Generate(cfgWith, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outWithout != outWith {
+		t.Error("empty ExtraPackages should produce the same output as nil ExtraPackages")
+	}
+}
+
+func TestGenerate_WithBoxName(t *testing.T) {
+	cfg := cloudinit.Config{
+		SSHPubKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... test@host",
+		BoxName:   "mybox",
+	}
+
+	out, err := cloudinit.Generate(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// runcmd should create the prompt file via printf.
+	if !strings.Contains(out, `> ~/.codebox-prompt.zsh`) {
+		t.Error("output should contain runcmd creating .codebox-prompt.zsh")
+	}
+
+	// The prompt content should include the box name.
+	if !strings.Contains(out, `[codebox:mybox]`) {
+		t.Error("output should contain PROMPT with box name")
+	}
+
+	// runcmd should source the prompt file.
+	if !strings.Contains(out, `source ~/.codebox-prompt.zsh`) {
+		t.Error("output should contain runcmd to source .codebox-prompt.zsh")
+	}
+
+	// No write_files entry for the prompt file (must be runcmd only).
+	writeFilesIdx := strings.Index(out, "write_files:")
+	runcmdIdx := strings.Index(out, "runcmd:")
+	promptFileIdx := strings.Index(out, ".codebox-prompt.zsh")
+
+	if promptFileIdx < runcmdIdx {
+		t.Error("prompt file creation should be in runcmd, not write_files")
+	}
+
+	// The printf and source lines must come AFTER Oh My Zsh theme sed and BEFORE chsh.
+	sourceIdx := strings.Index(out, "source ~/.codebox-prompt.zsh")
+	themeIdx := strings.Index(out, "ZSH_THEME")
+	chshIdx := strings.Index(out, "chsh -s /usr/bin/zsh dev")
+
+	if sourceIdx < 0 || themeIdx < 0 || chshIdx < 0 || writeFilesIdx < 0 {
+		t.Fatal("expected all prompt-related commands to be present")
+	}
+
+	if themeIdx >= sourceIdx {
+		t.Error("theme sed should come before prompt source")
+	}
+
+	if sourceIdx >= chshIdx {
+		t.Error("prompt source should come before chsh")
+	}
+
+	// Validate YAML.
+	var parsed any
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Errorf("output is not valid YAML: %v", err)
+	}
+}
+
+func TestGenerate_WithoutBoxName(t *testing.T) {
+	cfg := cloudinit.Config{
+		SSHPubKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... test@host",
+	}
+
+	out, err := cloudinit.Generate(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No prompt customization when BoxName is empty.
+	if strings.Contains(out, ".codebox-prompt.zsh") {
+		t.Error("output should NOT contain .codebox-prompt.zsh when BoxName is empty")
+	}
+
+	if strings.Contains(out, "source ~/.codebox-prompt") {
+		t.Error("output should NOT contain prompt source runcmd when BoxName is empty")
+	}
+}

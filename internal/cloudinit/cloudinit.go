@@ -12,8 +12,10 @@ import (
 
 // Config holds the parameters for generating cloud-init user-data.
 type Config struct {
-	SSHPubKey     string // public key in authorized_keys format
-	TailScaleAuth string // TailScale auth key (empty = skip TailScale setup)
+	SSHPubKey     string   // public key in authorized_keys format
+	TailScaleAuth string   // TailScale auth key (empty = skip TailScale setup)
+	ExtraPackages []string // additional OS packages from a box profile
+	BoxName       string   // box name shown in the shell prompt (empty = no prompt customization)
 }
 
 const cloudInitTemplate = `#cloud-config
@@ -37,6 +39,9 @@ packages:
   - fail2ban
   - firewalld
   - policycoreutils-python-utils
+{{- range .ExtraPackages}}
+  - {{.}}
+{{- end}}
 package_update: true
 package_upgrade: true
 
@@ -51,6 +56,7 @@ write_files:
       export PATH="/usr/local/go/bin:$PATH"
 
 runcmd:
+  - systemctl mask systemd-binfmt.service
   - systemctl enable --now firewalld
   - firewall-cmd --permanent --add-port=2222/tcp
   - firewall-cmd --permanent --remove-service=ssh
@@ -60,11 +66,15 @@ runcmd:
   - systemctl restart sshd
   - systemctl enable --now fail2ban
   - curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz -o /tmp/go.tar.gz && tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
-  - su - dev -c 'curl -fsSL https://opencode.ai/install | bash'
   - su - dev -c 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
   - su - dev -c 'curl -fsSL https://raw.githubusercontent.com/win0err/aphrodite-terminal-theme/master/aphrodite.zsh-theme -o ~/.oh-my-zsh/custom/themes/aphrodite.zsh-theme'
   - su - dev -c "sed -i 's/ZSH_THEME=\"robbyrussell\"/ZSH_THEME=\"aphrodite\"/' ~/.zshrc"
+{{- if .BoxName}}
+  - su - dev -c 'printf "PROMPT=\"[codebox:{{.BoxName}}] \${PROMPT}\"\n" > ~/.codebox-prompt.zsh'
+  - su - dev -c 'echo "source ~/.codebox-prompt.zsh" >> ~/.zshrc'
+{{- end}}
   - chsh -s /usr/bin/zsh dev
+  - su - dev -c 'curl -fsSL https://opencode.ai/install | bash'
   - systemctl reset-failed
 {{- if .TailScaleAuth}}
   - curl -fsSL https://tailscale.com/install.sh | sh
@@ -82,6 +92,10 @@ func Generate(cfg Config, log *slog.Logger) (string, error) {
 	}
 
 	log.Debug("generating cloud-init")
+
+	if len(cfg.ExtraPackages) > 0 {
+		log.Debug("extra packages from profile", "packages", cfg.ExtraPackages)
+	}
 
 	if cfg.TailScaleAuth != "" {
 		log.Debug("tailscale enabled")

@@ -49,7 +49,9 @@ func NewRootCommand(reg *provider.Registry, log *slog.Logger, levelVar *slog.Lev
 		newUpCmd(reg, &dataDir, log),
 		newDownCmd(reg, &dataDir, log),
 		newSSHCmd(&dataDir, log),
+		newOpenCodeCmd(&dataDir, log),
 		newSyncCmd(&dataDir, log),
+		newFileSyncCmd(&dataDir, log),
 		newLsCmd(&dataDir),
 	)
 

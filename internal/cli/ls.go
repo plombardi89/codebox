@@ -28,12 +28,17 @@ func runLs(dataDir string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "NAME\tSTATUS\tPROVIDER\tIMAGE\tIP\tSSH PORT"); err != nil {
+	if _, err := fmt.Fprintln(w, "NAME\tSTATUS\tPROVIDER\tIMAGE\tPROFILE\tIP\tSSH PORT"); err != nil {
 		return fmt.Errorf("writing header: %w", err)
 	}
 
 	for _, b := range boxes {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", b.Name, b.Status, b.Provider, b.Image, b.IP, b.SSHPort); err != nil {
+		prof := b.Profile
+		if prof == "" {
+			prof = "-"
+		}
+
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n", b.Name, b.Status, b.Provider, b.Image, prof, b.IP, b.SSHPort); err != nil {
 			return fmt.Errorf("writing row: %w", err)
 		}
 	}
