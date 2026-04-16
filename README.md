@@ -45,6 +45,8 @@ codebox up mybox --provider azure --azure-vm-size standard_d4ads_v6
 codebox up mybox --profile python
 codebox up mybox --recreate              # destroy VM and recreate with fresh cloud-init
 codebox up mybox --tailscale             # requires TAILSCALE_AUTHKEY env var
+codebox up mybox --wait 10m              # wait up to 10m for SSH
+codebox up mybox --wait 0               # skip waiting for SSH
 ```
 
 | Flag | Default | Description |
@@ -59,6 +61,7 @@ codebox up mybox --tailscale             # requires TAILSCALE_AUTHKEY env var
 | `--profile` | | Box profile name (see [Profiles](#profiles)) |
 | `--recreate` | `false` | Delete and recreate the VM with fresh cloud-init |
 | `--tailscale` | `false` | Enable TailScale (requires `TAILSCALE_AUTHKEY`) |
+| `--wait` | `5m` | Wait for SSH after VM is ready (`0` to disable) |
 
 ### `codebox down <name>`
 
@@ -94,19 +97,23 @@ codebox ssh mybox --manual                 # print the ssh command instead of ru
 
 ### `codebox opencode <name>`
 
-Start an OpenCode server on the remote box and attach the local TUI via an SSH tunnel.
+Attach to the OpenCode server running on a codebox.
 
-This runs `opencode serve` on the VM, sets up local port forwarding, then runs `opencode attach` locally. When you exit the TUI, the tunnel is cleaned up automatically.
+The VM runs `opencode serve` as a systemd user service that starts automatically on boot and survives SSH disconnects. This command sets up an SSH tunnel with local port forwarding and runs `opencode attach` locally. When you exit the TUI, only the tunnel is torn down — the remote server keeps running.
 
 ```sh
 codebox opencode mybox
 codebox opencode mybox --wait              # wait for SSH first (useful right after 'up')
-codebox opencode mybox --port 8080         # use a different port
+codebox opencode mybox --port 8080         # use a different local port
+codebox opencode mybox --dir /home/dev/project  # set the working directory
+codebox opencode mybox -s <session-id>     # reconnect to a specific session
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--port` | `4096` | Port for the OpenCode server (used on both remote and local sides of the tunnel) |
+| `--port` | `4096` | Local port to forward to the remote OpenCode server |
+| `--dir` | | Working directory for the OpenCode TUI on the remote box |
+| `-s, --session` | | Session ID to continue |
 | `--wait` | | Wait for SSH to become ready. Accepts an optional duration (default `5m`). |
 
 ### `codebox ls`
@@ -185,7 +192,7 @@ VMs are provisioned with cloud-init on Fedora. The baseline configuration includ
 - **Shell:** zsh with Oh My Zsh and the Aphrodite theme
 - **Prompt:** `[codebox:<name>]` prepended to the zsh prompt
 - **Go:** 1.24.4 installed to `/usr/local/go`
-- **OpenCode:** installed to `~/.opencode/bin/opencode`
+- **OpenCode:** installed to `~/.opencode/bin/opencode`, runs as a systemd user service (`opencode-serve.service`) on port 4096 with linger enabled
 - **SSH:** runs on port 2222, root login disabled, password auth disabled
 - **Firewall:** firewalld with only port 2222/tcp open
 - **SELinux:** port 2222 allowed for sshd
@@ -201,10 +208,10 @@ Profile packages are installed alongside the baseline packages.
 
 ```sh
 codebox up work
-codebox opencode work --wait
+codebox opencode work
 ```
 
-The `--wait` flag handles the case where cloud-init is still running. Once SSH is ready, the OpenCode TUI attaches automatically.
+`codebox up` waits for SSH by default (up to 5m), so the box is ready by the time it returns. Then `codebox opencode` tunnels to the remote OpenCode server and attaches the local TUI.
 
 ### Recreate a box with a different profile
 

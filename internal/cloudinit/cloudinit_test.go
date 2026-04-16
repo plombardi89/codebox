@@ -78,6 +78,37 @@ func TestGenerate_Basic(t *testing.T) {
 		t.Error("output should NOT contain tailscale when TailScaleAuth is empty")
 	}
 
+	// Verify OpenCode systemd user service setup.
+	if !strings.Contains(out, "enable-linger dev") {
+		t.Error("output should contain loginctl enable-linger dev")
+	}
+
+	if !strings.Contains(out, "opencode-serve.service") {
+		t.Error("output should contain opencode-serve.service unit file creation")
+	}
+
+	if !strings.Contains(out, "systemctl --user enable --now opencode-serve.service") {
+		t.Error("output should contain systemctl --user enable --now opencode-serve.service")
+	}
+
+	// Verify ordering: opencode install before systemd service setup.
+	opencodeInstallIdx := strings.Index(out, "opencode.ai/install")
+	lingerIdx := strings.Index(out, "enable-linger dev")
+	serviceEnableIdx := strings.Index(out, "systemctl --user enable --now opencode-serve.service")
+	resetFailedIdx := strings.Index(out, "systemctl reset-failed")
+
+	if opencodeInstallIdx >= lingerIdx {
+		t.Error("opencode install should come before enable-linger")
+	}
+
+	if lingerIdx >= serviceEnableIdx {
+		t.Error("enable-linger should come before service enable")
+	}
+
+	if serviceEnableIdx >= resetFailedIdx {
+		t.Error("service enable should come before systemctl reset-failed")
+	}
+
 	// Validate YAML
 	var parsed any
 	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {

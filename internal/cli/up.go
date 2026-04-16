@@ -42,6 +42,9 @@ func newUpCmd(reg *provider.Registry, dataDir *string, log *slog.Logger) *cobra.
 	cmd.Flags().Bool("recreate", false, "delete and recreate the box with fresh cloud-init config")
 	cmd.Flags().String("profile", "", "box profile name to load from ~/.codebox/profiles/<name>.yaml")
 
+	wait := cmd.Flags().String("wait", "5m", `wait for SSH after VM is ready (0 to disable)`)
+	_ = wait
+
 	return cmd
 }
 
@@ -352,10 +355,22 @@ func runUp(cmd *cobra.Command, args []string, reg *provider.Registry, dataDir st
 		if err := state.Save(stateFile, st, log); err != nil {
 			return fmt.Errorf("saving state: %w", err)
 		}
+	}
 
-		// Wait for cloud-init to finish and SSH key auth to work.
+	// Wait for SSH to become ready unless --wait 0.
+	waitFlag, err := getFlag(cmd, "wait")
+	if err != nil {
+		return err
+	}
+
+	if waitFlag != "0" && waitFlag != "0s" {
+		timeout, err := time.ParseDuration(waitFlag)
+		if err != nil {
+			return fmt.Errorf("invalid --wait duration: %w", err)
+		}
+
 		keyPath := sshkey.PrivateKeyPath(datadir.SSHDir(dataDir, name))
-		if err := waitForSSH(cmd.Context(), keyPath, st.IP, st.SSHPort, 5*time.Minute, log); err != nil {
+		if err := waitForSSH(cmd.Context(), keyPath, st.IP, st.SSHPort, timeout, log); err != nil {
 			return err
 		}
 	}

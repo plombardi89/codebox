@@ -75,6 +75,9 @@ runcmd:
 {{- end}}
   - chsh -s /usr/bin/zsh dev
   - su - dev -c 'curl -fsSL https://opencode.ai/install | bash'
+  - loginctl enable-linger dev
+  - su - dev -c 'mkdir -p ~/.config/systemd/user && printf "[Unit]\nDescription=OpenCode headless server\nAfter=network-online.target\n\n[Service]\nExecStart=/home/dev/.opencode/bin/opencode serve --port 4096 --hostname 127.0.0.1\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n" > ~/.config/systemd/user/opencode-serve.service'
+  - su - dev -c 'systemctl --user daemon-reload && systemctl --user enable --now opencode-serve.service'
   - systemctl reset-failed
 {{- if .TailScaleAuth}}
   - curl -fsSL https://tailscale.com/install.sh | sh

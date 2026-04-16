@@ -22,14 +22,16 @@ import (
 func newOpenCodeCmd(dataDir *string, log *slog.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "opencode <name>",
-		Short: "Run OpenCode on a codebox and attach locally",
+		Short: "Attach to the OpenCode server running on a codebox",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runOpenCode(cmd, args, *dataDir, log)
 		},
 	}
 
-	cmd.Flags().Int("port", 4096, "port for the OpenCode server (used on both remote and local sides)")
+	cmd.Flags().Int("port", 4096, "local port to forward to the remote OpenCode server")
+	cmd.Flags().String("dir", "", "working directory for the OpenCode TUI on the remote box")
+	cmd.Flags().StringP("session", "s", "", "session ID to continue")
 
 	wait := cmd.Flags().String("wait", "", `wait for SSH to become ready (optional timeout, default "5m")`)
 	_ = wait
@@ -37,6 +39,10 @@ func newOpenCodeCmd(dataDir *string, log *slog.Logger) *cobra.Command {
 
 	return cmd
 }
+
+// remoteOpenCodePort is the port that the opencode-serve systemd user service
+// listens on inside the VM. This is hardcoded in the cloud-init template.
+const remoteOpenCodePort = 4096
 
 func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Logger) error {
 	name := args[0]
@@ -54,7 +60,7 @@ func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Lo
 
 	keyPath := sshkey.PrivateKeyPath(datadir.SSHDir(dataDir, name))
 
-	port, err := cmd.Flags().GetInt("port")
+	localPort, err := cmd.Flags().GetInt("port")
 	if err != nil {
 		return fmt.Errorf("reading --port flag: %w", err)
 	}
@@ -76,19 +82,18 @@ func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Lo
 		}
 	}
 
-	// Build the SSH command that starts the tunnel and remote opencode serve.
-	portStr := fmt.Sprintf("%d", port)
-	localForward := fmt.Sprintf("%d:127.0.0.1:%d", port, port)
-	remoteCmd := fmt.Sprintf("/home/dev/.opencode/bin/opencode serve --port %d --hostname 127.0.0.1", port)
+	// Build the SSH tunnel command. The opencode server is managed by a
+	// systemd user service on the VM, so we only need port forwarding (-N).
+	localForward := fmt.Sprintf("%d:127.0.0.1:%d", localPort, remoteOpenCodePort)
 
 	sshArgs := []string{
 		"-i", keyPath,
 		"-p", fmt.Sprintf("%d", st.SSHPort),
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-N",
 		"-L", localForward,
 		fmt.Sprintf("%s@%s", state.DefaultUser, st.IP),
-		remoteCmd,
 	}
 
 	log.Debug("SSH tunnel arguments", "args", strings.Join(append([]string{"ssh"}, sshArgs...), " "))
@@ -100,10 +105,6 @@ func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Lo
 
 	tunnelCmd := exec.CommandContext(cmd.Context(), sshPath, sshArgs...)
 	tunnelCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	// Send tunnel output to debug log so it doesn't pollute the terminal.
-	tunnelCmd.Stdout = &logWriter{log: log, level: slog.LevelDebug, prefix: "tunnel:stdout"}
-	tunnelCmd.Stderr = &logWriter{log: log, level: slog.LevelDebug, prefix: "tunnel:stderr"}
 
 	if err := tunnelCmd.Start(); err != nil {
 		return fmt.Errorf("starting SSH tunnel: %w", err)
@@ -119,7 +120,7 @@ func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Lo
 	}()
 
 	// Wait for the remote opencode server to become reachable through the tunnel.
-	healthURL := fmt.Sprintf("http://127.0.0.1:%s/global/health", portStr)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/global/health", localPort)
 	if err := waitForHealth(cmd.Context(), healthURL, 2*time.Minute, tunnelCmd, log); err != nil {
 		return err
 	}
@@ -130,15 +131,35 @@ func runOpenCode(cmd *cobra.Command, args []string, dataDir string, log *slog.Lo
 		return fmt.Errorf("finding opencode binary: %w (is opencode installed locally?)", err)
 	}
 
-	attachURL := fmt.Sprintf("http://127.0.0.1:%s", portStr)
+	attachURL := fmt.Sprintf("http://127.0.0.1:%d", localPort)
 
-	log.Debug("attaching to opencode server", "url", attachURL)
+	attachArgs := []string{"attach", attachURL}
+
+	dir, err := getFlag(cmd, "dir")
+	if err != nil {
+		return err
+	}
+
+	if dir != "" {
+		attachArgs = append(attachArgs, "--dir", dir)
+	}
+
+	session, err := getFlag(cmd, "session")
+	if err != nil {
+		return err
+	}
+
+	if session != "" {
+		attachArgs = append(attachArgs, "--session", session)
+	}
+
+	log.Debug("attaching to opencode server", "url", attachURL, "args", attachArgs)
 
 	// Set up signal forwarding so ctrl+c goes to the attach process, not us.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	attachCmd := exec.CommandContext(ctx, opencodePath, "attach", attachURL)
+	attachCmd := exec.CommandContext(ctx, opencodePath, attachArgs...)
 	attachCmd.Stdin = os.Stdin
 	attachCmd.Stdout = os.Stdout
 	attachCmd.Stderr = os.Stderr
@@ -205,20 +226,4 @@ func waitForHealth(ctx context.Context, url string, timeout time.Duration, tunne
 		fmt.Print(".")
 		time.Sleep(pollInterval)
 	}
-}
-
-// logWriter is an io.Writer that sends each line to slog at the given level.
-type logWriter struct {
-	log    *slog.Logger
-	level  slog.Level
-	prefix string
-}
-
-func (w *logWriter) Write(p []byte) (int, error) {
-	msg := strings.TrimRight(string(p), "\n")
-	if msg != "" {
-		w.log.Log(nil, w.level, msg, "source", w.prefix)
-	}
-
-	return len(p), nil
 }
